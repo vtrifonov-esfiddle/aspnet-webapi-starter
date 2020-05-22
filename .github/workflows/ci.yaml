@@ -1,0 +1,74 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '.devcontainer/**'
+      - '.vscode/**'
+      - 'dev/**'
+      - 'README.md'
+  pull_request:
+    branches: [ master ]
+    paths-ignore:
+      - '.devcontainer/**'
+      - '.vscode/**'
+      - 'dev/**'
+      - 'README.md'
+env:
+  VERSION: v0.1.0
+  FULL_VERSION: v0.1.0-${{ github.run_number }}
+  IMAGE_ID: docker.pkg.github.com/${{ github.repository }}/aspnet-webapi-starter
+  DOCKER_REGISTRY: docker.pkg.github.com/${{ github.repository }}
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+         
+      - name: run .net unit tests
+        run: . ./.github/workflows/ci/runDotnetUnitTests.sh
+        env:
+          WORKSPACE_DIR_DOCKER_MOUNT: ${{github.workspace}}
+
+      - uses: actions/upload-artifact@v2
+        if: ${{ success() || failure() }}
+        with:
+          name: unit-test-results
+          path: ./testResults/
+           
+  build:
+    needs: [unit-tests]      
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v2
+
+    # Runs a set of commands using the runners shell
+    - name: Docker build
+      run: docker build --file ./.github/workflows/ci/Dockerfile --tag $IMAGE_ID:$VERSION --tag $IMAGE_ID:$FULL_VERSION $CONTEXT
+      env:
+        CONTEXT: ./src
+    - name: Log into registry
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+
+    - name: Push image
+      run: |   
+        echo IMAGE_ID=$IMAGE_ID
+        echo VERSION=$VERSION
+        echo FULL_VERSION=$FULL_VERSION
+        docker push $IMAGE_ID:$FULL_VERSION
+        docker push $IMAGE_ID:$VERSION
+        
+    - name: tag git commit
+      run: |
+        echo FULL_VERSION=$FULL_VERSION
+        git tag $FULL_VERSION
+        git push origin $FULL_VERSION
